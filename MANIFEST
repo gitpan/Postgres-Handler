@@ -1,6 +1,8 @@
 Changes
+lib/Postgres/Handler.pm
 Makefile.PL
 MANIFEST
 README
 t/Handler.t
-lib/Postgres/Handler.pm
+t/test.t
+META.yml                                 Module meta-data (added by MakeMaker)

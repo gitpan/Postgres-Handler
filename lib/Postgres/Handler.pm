@@ -109,8 +109,8 @@ use DBI;
 =cut
 #==============================================================================
 
-our $VERSION 				= 1.1;							# Set our version
-our $BUILD					= '2005-06-09 16:11';		# BUILD
+our $VERSION 				= 1.2;							# Set our version
+our $BUILD					= '2005-06-10 16:11';		# BUILD
 
 struct (
 		dbname	=> '$',
@@ -492,7 +492,16 @@ sub Field {
 =head2 GetRecord()
 
  Retrieves the record in a hash reference with uppercase field names.
+
+ rtype not set or set to 'HASHREF',
  Calls fetchrow_hashref('NAME_uc') from the specified SQL statement.
+
+ rtype not set or set to 'ARRAY',
+ Calls fetchrow_array() from the specified SQL statement.
+
+ rtype not set or set to 'ITEM',
+ Calls fetchrow() from the specified SQL statement.
+
 
 =over
 
@@ -501,13 +510,13 @@ sub Field {
  [0] or -name     select from the named statement handle,
                   if not set defaults to the last active statement handle
 
- [1] or -rtype    'HASHREF' (default) or 'ARRAY' - type of structure to return data in
+ [1] or -rtype    'HASHREF' (default) or 'ARRAY' or 'ITEM' - type of structure to return data in
 
  [2] or -finish   set to '1' to close the named statement handle after returning the data
 
 =item Returns
 
- the hashref or array on success
+ the hashref or array or scaler on success
  0 for failure, get message with lasterror
 
 =back
@@ -521,7 +530,7 @@ sub GetRecord {
 	my @retarry;
 	my $err;
 
-	$rtype = $rtype || 'HASHREF';
+	$rtype ||= 'HASHREF';
 
 	my $sth = ($name ? $self->nsth($name) : $self->sth);
 
@@ -533,6 +542,9 @@ sub GetRecord {
 		} elsif ($rtype eq 'ARRAY'  ) { 
 			@retarry = $sth->fetchrow_array()				or $err = "GetRecord() $DBI::errstr"; 
 			if (!$DBI::errstr) { return @retarry; }
+		} elsif ($rtype eq 'ITEM'  ) { 
+			$retval = $sth->fetchrow()							or $err = "GetRecord() $DBI::errstr"; 
+			if (!$DBI::errstr) { return $retval; }
 		}
 	
 		# Error Handling
@@ -949,6 +961,11 @@ __END__
 
 
 =head1 REVISION HISTORY
+ v1.2 - Jun 10 2005
+      GetRecord() mods, added 'ITEM'
+		test file fix in distribution
+		created yml file for added requisites on CPAN
+
 
  v1.1 - Jun 9 2005
       pod updates

@@ -5,13 +5,12 @@
 
 # change 'tests => 1' to 'tests => last_test_to_print';
 
-use Test::More tests => 5;
+use Test::More tests => 4;
 BEGIN { 
         use_ok('CGI::Carp');
         use_ok('CGI::Util');
         use_ok('Class::Struct');
         use_ok('DBI');
-        use_ok('Postgres::Handler');
       };
 
 #########################
