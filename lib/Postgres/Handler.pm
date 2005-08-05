@@ -1,6 +1,6 @@
 =head1 NAME
 
-Postgres::Handler - Accessors for PostgreSQL data (1.1)
+Postgres::Handler - Accessors for PostgreSQL data (1.3)
 
 =head1 DESCRIPTION
 
@@ -37,6 +37,7 @@ Accessors for PostgreSQL data.  Simplifies data access through a series of stand
  CGI::Carp
  CGI::Util
  Class::Struct
+ DBD::Pg 1.43 or greater (fixes a bug when fetching Postgres varchar[] array data)
  DBI
 
 =head1 EXPORT
@@ -109,8 +110,8 @@ use DBI;
 =cut
 #==============================================================================
 
-our $VERSION 				= 1.2;							# Set our version
-our $BUILD					= '2005-06-10 16:11';		# BUILD
+our $VERSION 				= 1.3;							# Set our version
+our $BUILD					= '2005-07-17 21:48';		# BUILD
 
 struct (
 		dbname	=> '$',
@@ -460,6 +461,7 @@ sub Field {
 				# Grab the record & return the specified field
 				#		
 				if (($options{KEY} && ($options{KEY} != $self->data("$table!key"))) || ($options{WHERE} ne '')) {
+
 					my $where = (($options{WHERE} ne '') ? qq[WHERE $options{WHERE}] : 'WHERE ' . $self->data("$table!PGHkeyfld") . qq[ = $options{KEY}]);
 					$self->PrepLEX( -cmd => qq[SELECT * FROM $table $where], -name => "$table!PGHfield" );
 					$self->data("$table!PGHfhr", $self->GetRecord("$table!PGHfield"));
@@ -683,6 +685,7 @@ sub PrepLE () {
 	
 	if ($name) {	$self->data("$name!sth",$theSTH); }		# -name set - store sth in named data element as well
 	$self->sth($theSTH);												# Most recent statement handle goes in sth()
+
 	return $retval;
 }
 
@@ -961,6 +964,10 @@ __END__
 
 
 =head1 REVISION HISTORY
+ v1.3 - Jul 17 2005
+      Minor patches
+		Now requires DBD::Pg version 1.43 or greater
+
  v1.2 - Jun 10 2005
       GetRecord() mods, added 'ITEM'
 		test file fix in distribution

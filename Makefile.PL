@@ -9,6 +9,7 @@ WriteMakefile(
 									CGI::Carp 			=> 0,
 									CGI::Util			=> 0,
 									Class::Struct		=> 0,
+									DBD::Pg				=> 1.43,
 									DBI					=> 0,
 	 							 }, # e.g., Module::Name => 1.1
     ($] >= 5.005 ?     ## Add these new keywords supported since 5.005
