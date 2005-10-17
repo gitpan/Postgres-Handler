@@ -110,8 +110,8 @@ use DBI;
 =cut
 #==============================================================================
 
-our $VERSION 				= 1.3;							# Set our version
-our $BUILD					= '2005-07-17 21:48';		# BUILD
+our $VERSION 				= 1.5;							# Set our version
+our $BUILD					= '2005-10-17 17:50';		# BUILD
 
 struct (
 		dbname	=> '$',
@@ -257,18 +257,19 @@ sub AddUpdate() {
 
 	if (!$options{DONTSTAMP} && $options{DBSTAMP}) 	{  $options{hrCGIMAP}->{$options{DBSTAMP}} = $options{DBSTAMP}; }
 
-	# Setup Field Mapper
-	#
-	my @inflds = sort keys %{$options{hrCGIMAP}};
-
 	# Check Mandatory Parameters
 	#
 	foreach (CGI, TABLE, DBKEY) { 
 		if (!defined $options{$_}) { 
 			$self->data(ERRMSG,"PGH AddUpdate - parameter $_ is required for table $options{TABLE}.");			
-			return; 
+			return 0; 
 		} 
 	}
+
+	# Setup Field Mapper
+	#
+	my @inflds = sort keys %{$options{hrCGIMAP}};
+
 
 	# Check Required Data Fields
 	#
@@ -276,7 +277,7 @@ sub AddUpdate() {
 		foreach (@{$options{REQUIRED}}) {
 			if ($options{CGI}->param($options{hrCGIMAP}->{$_}) eq '') {
 				$self->data(ERRMSG,"PGH AddUpdate - CGI parameter $_ must contain data.");			
-				return;
+				return 0;
 			}
 		}		
 	}
@@ -357,6 +358,10 @@ sub AddUpdate() {
 	[0] = SQL command
 	[1] = Die on error
 
+ Set the object 'errortype' data element to 'simple' for short error messages.
+ i.e.
+ $self->data('errortype') = 'simple';
+
 =over
 
 =item Returns
@@ -377,7 +382,7 @@ sub DoLE {
 
 	if (!$self->dbh()) 	{	$self->SetDH(); }
 
-	if ($self->dbh())		{	$self->dbh()->do($cmdstr) or $err = "$cmdstr\n\t".$DBI::errstr; } 
+	if ($self->dbh())		{	$self->dbh()->do($cmdstr) or $err = (($self->data('errortype') ne 'simple') ? $cmdstr . "\n\t" : '') . $DBI::errstr; } 
 	else 						{	$err = 'Could not obtain data handle'; }
 
 	if ($err || ($DBI::errstr ne '')) {	
@@ -964,6 +969,12 @@ __END__
 
 
 =head1 REVISION HISTORY
+ v1.5 - Oct 2005
+ 		Fixed return value error on AddUpdate()
+
+ v1.4 - Aug 2005
+      Minor patches
+
  v1.3 - Jul 17 2005
       Minor patches
 		Now requires DBD::Pg version 1.43 or greater
