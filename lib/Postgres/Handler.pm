@@ -1,6 +1,6 @@
 =head1 NAME
 
-Postgres::Handler - Accessors for PostgreSQL data (1.3)
+Postgres::Handler - Accessors for PostgreSQL data 
 
 =head1 DESCRIPTION
 
@@ -61,6 +61,8 @@ use CGI::Util qw(rearrange);
 use Class::Struct;
 use DBI;
 
+use constant cPGNoRecs	=> '0E0';
+
 #==============================================================================
 
 =head1 DATA ACCESS METHODS
@@ -110,8 +112,8 @@ use DBI;
 =cut
 #==============================================================================
 
-our $VERSION 				= 1.5;							# Set our version
-our $BUILD					= '2005-10-17 17:50';		# BUILD
+our $VERSION 				= 1.8;							# Set our version
+our $BUILD					= '2006-01-24 23:20';		# BUILD
 
 struct (
 		dbname	=> '$',
@@ -125,6 +127,8 @@ struct (
 #==============================================================================
 
 =head1 PUBLIC METHODS
+
+=cut
 
 #==============================================================================
 
@@ -141,9 +145,24 @@ struct (
  a new record is added.
 
  Your database key field should have a default value that is unique
- and should be set as type 'PRIMARY KEY'.  We always use the default
- nextval('myspecialsequence') to auto-increment our keys when adding
- new records.
+ and should be set as type 'PRIMARY KEY'.  We always use serial primary 
+ key to auto-increment our keys when adding new records.
+
+=over
+
+=item example
+
+ --
+ -- Table: xyz
+ --
+ 
+ CREATE TABLE xyz (
+    xyz_pkid    serial       primary key,
+	 xyz_update  timestamp    default now(),
+	 xyz_ipadd   char(32)
+	 );
+
+=back
 
  If a key is provided but is doesn't match anything in the existing
  data then the update fails, UNLESS... CHECKKEY=> 1 in which case it
@@ -325,16 +344,17 @@ sub AddUpdate() {
 			DATAMOD: {
 				# Timestamper
 				#
-				if (!$options{DONTSTAMP} && $options{DBSTAMP} && ($_ eq $options{DBSTAMP})) 	{ $data = 'now()';					last DATAMOD; }
+				if (!$options{DONTSTAMP} && $options{DBSTAMP} && ($_ eq $options{DBSTAMP})) 	
+												{ $data = 'now()';					last DATAMOD; }
 
 				# MD5 Encryption
 				#
-				if ($_ eq $options{MD5}) 																		{ $data = qq[md5('$data')];		last DATAMOD; }
+				if ($_ eq $options{MD5}) { $data = qq[md5('$data')];		last DATAMOD; }
 
 				# NULL Data
 				#
-				if ($data eq '')																	 				{ $data = 'NULL';						last DATAMOD; }
-				else																									{ $data	= $self->Quote($data);	last DATAMOD; }
+				if ($data eq '')			{ $data = 'NULL';						last DATAMOD; }
+				else							{ $data	= $self->Quote($data);	last DATAMOD; }
 			}
 
 			push(@values, qq[ $_ = $data]);	
@@ -357,6 +377,8 @@ sub AddUpdate() {
  Do DBH Command and log any errors to the log file.
 	[0] = SQL command
 	[1] = Die on error
+	[2] = return error on 0 records affected
+	[3] = quiet mode (don't log via carp)
 
  Set the object 'errortype' data element to 'simple' for short error messages.
  i.e.
@@ -377,18 +399,29 @@ sub DoLE {
 	my $self			= shift;
 	my $cmdstr 		= shift;
 	my $dienow		= shift;
-	my $err;
+	my $zeroerror	= shift;
+	my $quiet		= shift;
+	my $err			= '';
 	my $retval 		= 1;
 
-	if (!$self->dbh()) 	{	$self->SetDH(); }
+	$self->SetDH() if (!$self->dbh());
 
-	if ($self->dbh())		{	$self->dbh()->do($cmdstr) or $err = (($self->data('errortype') ne 'simple') ? $cmdstr . "\n\t" : '') . $DBI::errstr; } 
-	else 						{	$err = 'Could not obtain data handle'; }
 
-	if ($err || ($DBI::errstr ne '')) {	
-		$self->data(ERRMSG,$err || $DBI::errstr);
-		if ($dienow) 	{ croak($err);	}
-		else				{ carp($err);	$retval = 0;	}
+	if ($self->dbh())		{	
+		$retval = $self->dbh()->do($cmdstr);
+		$retval = 0 if ($zeroerror && ($rv eq cPGNoRecs));
+	 	if (!$retval) { 
+			$err = (($self->data('errortype') ne 'simple') ? $cmdstr . "\n\t" : '') . $DBI::errstr; 
+		}
+	} else 					{	
+		$err 		= 'Could not obtain data handle'; 
+		$retval 	= 0;
+	}
+
+	if ( !$retval ) {	
+		$self->data(ERRMSG,$err);
+		if 	($dienow) 	{ croak($err);	}
+		elsif	(!$quiet)	{ carp($err);	}
 	} else {
 		$self->data(ERRMSG,'');
 	}
@@ -418,6 +451,8 @@ sub DoLE {
 
  WHERE	 => Use this where clause to select the record instead of the key
 
+ FORCE	 => Force Reload
+
 =item Returns
 
  The value of the field.
@@ -443,6 +478,11 @@ sub Field {
 	my $retval;
 	my $nokey;
 
+	$options{DATA} ||= '';
+	$options{KEY}  ||= '';
+	$options{FORCE}||= 0;
+	$options{WHERE}||= '';
+
 	# Table And Field Set
 	#
 	if ($table && $field) {
@@ -451,7 +491,7 @@ sub Field {
 		# Or set with outdated key
 		# Reload
 		#
-		if (!$self->data($options{DATA}) || ($options{KEY} != $self->data("$table!key"))) {
+		if (!$self->data($options{DATA}) || ($options{KEY} ne $self->data("$table!key")) || $options{FORCE}) {
 
 			# Key & Where Not Set - set value to blank
 			#
@@ -465,7 +505,7 @@ sub Field {
 	
 				# Grab the record & return the specified field
 				#		
-				if (($options{KEY} && ($options{KEY} != $self->data("$table!key"))) || ($options{WHERE} ne '')) {
+				if (($options{KEY} && ($options{KEY} ne ($self->data("$table!key") || ''))) || ($options{WHERE} ne '')) {
 
 					my $where = (($options{WHERE} ne '') ? qq[WHERE $options{WHERE}] : 'WHERE ' . $self->data("$table!PGHkeyfld") . qq[ = $options{KEY}]);
 					$self->PrepLEX( -cmd => qq[SELECT * FROM $table $where], -name => "$table!PGHfield" );
@@ -534,31 +574,29 @@ sub GetRecord {
 	my ($self, @p)	= @_;
 	my ($name,$rtype, $finish) = rearrange([NAME,RTYPE,FINISH],@p);
 	my $retval		= 1;
-	my @retarry;
-	my $err;
 
-	$rtype ||= 'HASHREF';
+	$rtype 		||= 'HASHREF';
 
 	my $sth = ($name ? $self->nsth($name) : $self->sth);
 
 	if ($sth) {
 		$self->data(ERRMSG,'');
 		if ($rtype eq 'HASHREF') {	
-			$retval  = $sth->fetchrow_hashref('NAME_uc')	or $err = "GetRecord() $DBI::errstr"; 
-			if (!$DBI::errstr) { return $retval; }
+			$retval  = $sth->fetchrow_hashref('NAME_uc'); 
+			return $retval if (!$DBI::errstr);
 		} elsif ($rtype eq 'ARRAY'  ) { 
-			@retarry = $sth->fetchrow_array()				or $err = "GetRecord() $DBI::errstr"; 
-			if (!$DBI::errstr) { return @retarry; }
+			my @retarry = $sth->fetchrow_array(); 
+			return @retarry if (!$DBI::errstr);
 		} elsif ($rtype eq 'ITEM'  ) { 
-			$retval = $sth->fetchrow()							or $err = "GetRecord() $DBI::errstr"; 
-			if (!$DBI::errstr) { return $retval; }
+			$retval = $sth->fetchrow(); 
+			return $retval if (!$DBI::errstr);
 		}
 	
 		# Error Handling
 		#
-		if ($err || ($DBI::errstr ne '')) {	
-			$self->data(ERRMSG,$err || $DBI::errstr);
-			carp($err);	
+		if ($DBI::errstr ne '') {	
+			$self->data(ERRMSG, 'GetRecord() ' . $DBI::errstr);
+			carp('GetRecord() ' . $DBI::errstr);	
 		}
 
 		# Close the statement if requested
@@ -659,9 +697,10 @@ sub PrepLE () {
 	my ($self,@p)	= @_;
 	my ($cmdstr, $execit, $dienow, $param, $name) = rearrange([CMD,EXEC,DIE,PARAM,NAME],@p);
 
-	my $err;
-	my $retval = 1;
-	my $theSTH;
+	my $err 		= '';	
+	my $retval 	= 1;
+	my $theSTH	= 0;
+		$param ||= '';
 
 	# Prepare/Execute Data Handle
 	#
@@ -672,7 +711,7 @@ sub PrepLE () {
 	if ($self->dbh()) {
 		$theSTH		= $self->dbh()->prepare($cmdstr) or $err = "$cmdstr\n\t".$DBI::errstr;
 		if ($execit) { 
-			if (($parm ne '') && ($cmdstr =~ /\?/)) 	{ 	$theSTH->execute($parm)  or $err = "EXECUTE: $cmdstr\n\t".$DBI::errstr; }
+			if (($param ne '') && ($cmdstr =~ /\?/)) 	{ 	$theSTH->execute($param) or $err = "EXECUTE: $cmdstr\n\t".$DBI::errstr; }
 			else													{ 	$theSTH->execute()       or $err = "EXECUTE: $cmdstr\n\t".$DBI::errstr; }
 		}
 
@@ -722,7 +761,7 @@ sub PrepLEX() {
 	my ($self,@p)	= @_;
 	my ($cmdstr, $dienow, $param, $name) = rearrange([CMD,DIE,PARAM,NAME],@p);
 
-	return $self->PrepLE($cmdstr,1,$dienow,$parm,$name);
+	return $self->PrepLE($cmdstr,1,$dienow,$param,$name);
 }
 
 #--------------------------------------------------------------------
@@ -873,7 +912,10 @@ sub CGIMap(@) {
 
 	# Booleans (not passed if not checked, force them to 0 here)
 	#
-	foreach (@{$options{BOOLEANS}}) { $options{hrCGIMAP}->{$_} = $options{CGI}->param($_); }
+	foreach (@{$options{BOOLEANS}}) { 
+		$options{hrCGIMAP}->{$_} = $options{CGI}->param($_); 
+		$options{CGI}->param($_ , $options{CGI}->param($_) || 'f');
+	}
 
 	foreach ($options{CGI}->param()) {	
 		if ($_ =~ /^$options{CGISTART}/) { 
@@ -967,8 +1009,17 @@ __END__
  View the license at http://www.charlestonsw.com/community/gpl.txt
  or at http://www.gnu.org/copyleft/gpl.html
 
-
 =head1 REVISION HISTORY
+
+ v1.8 - Jan 2006
+      Bug fix on PrepLE and PrepLEX for perl -w compatability
+		Added DoLE param to return error status (0) if the command affects 0 records '0E0'
+		Added DoLE param to keep quiet on errors (do not log to syslog via carp)
+		Documentation updates
+
+ v1.5 - Nov 2005
+ 		Fixed @BOOLEANS on AddUpdate to force 'f' setting instead of NULL if blank or 0
+
  v1.5 - Oct 2005
  		Fixed return value error on AddUpdate()
 
