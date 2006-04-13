@@ -66,8 +66,8 @@ None by default.
 #
 #==============================================================================
 
-package Postgres::Handler;									# Define the package name
 use CGI::Carp;
+package Postgres::Handler;									# Define the package name
 use CGI::Util qw(rearrange);
 use Class::Struct;
 use DBI;
@@ -123,8 +123,8 @@ use constant cPGNoRecs	=> '0E0';
 =cut
 #==============================================================================
 
-our $VERSION 				= 1.9;							# Set our version
-our $BUILD					= '2006-02-08 23:20';		# BUILD
+our $VERSION 				= 2.2;							# Set our version
+our $BUILD					= '2006-04-13 11:22';		# BUILD
 
 struct (
 		dbname	=> '$',
@@ -240,6 +240,10 @@ struct (
               of database field booleans that we want to force to false
 				  if not set by the equivalently named CGI field
 
+ RTNSEQ    => set to a sequence name and AddUpdate will return the value of this
+              sequence for the newly added record.  Useful for getting keys back
+				  from new records.
+
 =item Action
 
  Either adds or updates a record in the specified table.
@@ -281,7 +285,7 @@ sub AddUpdate() {
 	# Set Defaults
 	#
 	$options{DBKEY} 	||= $self->data("$options{TABLE}!PGHkeyfld");
-	$options{DBSTAMP} ||= $self->data("$options{TABLE}!PGHtimestamp");
+	$options{DBSTAMP} ||= $self->data("$options{TABLE}!PGHtimestamp") || '';
 	$options{MD5} 		||= $self->data("$options{TABLE}!PGHmd5");
 	$options{CGIKEY}  ||= $options{DBKEY};
 
@@ -344,6 +348,7 @@ sub AddUpdate() {
 
 			push(@values, $data); 
 		}
+
 		$cmdstr = qq[INSERT INTO $options{TABLE} (] . join(',',@inflds) . qq[) VALUES (] . join(',',@values) . qq[)];
 	
 	# Update Existing Type
@@ -373,10 +378,34 @@ sub AddUpdate() {
 		$cmdstr = qq[UPDATE $options{TABLE} SET	] . join(',',@values) . qq[ WHERE $options{DBKEY} = ] . $self->Quote($options{CGI}->param($options{CGIKEY}));
 	}
 
+	# Need To Get un-interupted Inserted Key
+	# Turn off autocommit for transation based processing
+	#
+	$DBH->{AutoCommit} = 0 if (($options{RTNSEQ} ne '') && ($cmdstr =~ /^INSERT/o));
+
 	# Execute The Command
 	#
 	$self->data(INFOMSG, ($options{VERBOSE} ? $cmdstr : substr($cmdstr,0,8)) );
-	return $self->DoLE($cmdstr);
+	my $rv = $self->DoLE($cmdstr);
+	
+	# Execute OK, RTNSEQ Set - Return sequence #
+	#
+	if ($rv && ($options{RTNSEQ} ne '')) {
+		if ($cmdstr =~ /^INSERT/o) {
+			$rv = $self->dbh()->last_insert_id(undef,undef,$options{TABLE},undef);
+		} else {
+			$rv = $options{CGI}->param($options{CGIKEY});
+		}
+	}
+
+	# Need To Get un-interupted Inserted Key
+	# Commit & reset autocommit
+	#
+	if (($options{RTNSEQ} ne '') && ($cmdstr =~ /^INSERT/o)) {
+			$self->dbh()->commit;
+			$DBH->{AutoCommit} = 1;
+	}
+	return $rv;
 }
 
 
@@ -823,6 +852,7 @@ sub Quote() {
 #----------------------------
 sub SetDH() {
 	my $self = shift;
+	my $DBH = $self->dbh();
 
 	if (!$DBH) {
 		$DBH = DBI->connect(
@@ -830,12 +860,11 @@ sub SetDH() {
 							$self->dbuser(),
 							$self->dbpass()
 							) or croak($DBI::errstr); 	
+		$DBH->{AutoCommit} = 1;
+		$DBH->{ChopBlanks} = 1;	
+		$self->dbh($DBH);
 	}
 
-	$DBH->{AutoCommit} = 1;
-	$DBH->{ChopBlanks} = 1;
-
-	$self->dbh($DBH);
 }
 
 #--------------------------------------------------------------------
@@ -1027,6 +1056,17 @@ __END__
  or at http://www.gnu.org/copyleft/gpl.html
 
 =head1 REVISION HISTORY
+
+ v2.2 - Apr 2006
+      Fixed problem with SetDH database handle management
+
+
+ v2.1 - Mar 2006
+      Added RTNSEQ feature to AddUpdate so we can get back the key of a newly added record
+
+
+ v2.0 - Feb 2006
+      Moved CGI::Carp outside of the package to prevent perl -w warnings
 
  v1.9 - Feb 2006
       Update Field() to prevent SIGV error when WHERE clause causes error on statement
